@@ -142,6 +142,202 @@ function genesis_upgrade_db_latest() {
 }
 
 /**
+ * Upgrade the database for changes in db version 3001.
+ *
+ * @since 3.0.0
+ */
+function genesis_upgrade_3001() {
+
+	genesis_upgrade_3001_page_blog();
+	genesis_upgrade_3001_page_archive();
+
+}
+
+/**
+ * Migrate query_args and/or template for pages using page_blog.php template in 3.0.0.
+ *
+ * @since 3.0.0
+ */
+function genesis_upgrade_3001_page_blog() {
+	$page_blog_ids = get_posts(
+		array(
+			'post_type'  => 'page',
+			'meta_key'   => '_wp_page_template',
+			'meta_value' => 'page_blog.php',
+			'nopaging'   => true,
+			'fields'     => 'ids',
+		)
+	);
+
+	if ( empty( $page_blog_ids ) ) {
+		return;
+	}
+
+	if ( ! genesis_theme_has_page_blog_template() ) {
+		genesis_create_page_blog_file();
+	}
+
+	$parameters = array_filter(
+		array(
+			'cat'              => genesis_get_option( 'blog_cat', GENESIS_SETTINGS_FIELD, false ),
+			'category__not_in' => genesis_get_option( 'blog_cat_exclude', GENESIS_SETTINGS_FIELD, false ),
+			'showposts'        => genesis_get_option( 'blog_cat_num', GENESIS_SETTINGS_FIELD, false ),
+		)
+	);
+
+	foreach ( $page_blog_ids as $page_blog_id ) {
+		$existing_query_args = genesis_get_custom_field( 'query_args', $page_blog_id );
+		$query_args          = wp_parse_args( $existing_query_args, $parameters );
+
+		if ( $query_args ) {
+			update_post_meta( $page_blog_id, 'query_args', urldecode( http_build_query( $query_args ) ) );
+		}
+	}
+}
+
+/**
+ * Generate page_archive.php template file for blogs using default Genesis page_archive.php.
+ *
+ * @since 3.0.0
+ */
+function genesis_upgrade_3001_page_archive() {
+	$page_archive_ids = get_posts(
+		array(
+			'post_type'  => 'page',
+			'meta_key'   => '_wp_page_template',
+			'meta_value' => 'page_archive.php',
+			'nopaging'   => true,
+			'fields'     => 'ids',
+		)
+	);
+
+	if ( empty( $page_archive_ids ) ) {
+		return;
+	}
+
+	if ( ! genesis_theme_has_page_archive_template() ) {
+		genesis_create_page_archive_file();
+	}
+}
+
+/**
+ * Determine if the 'Blog' page template is available.
+ *
+ * @since 3.0.0
+ *
+ * @return bool True if the 'Blog' template theme exists. False if else.
+ */
+function genesis_theme_has_page_blog_template() {
+	$templates = get_page_templates();
+
+	return isset( $templates['Blog'] );
+}
+
+/**
+ * Determine if the 'Archive' page template is available.
+ *
+ * @since 3.0.0
+ *
+ * @return bool True if the 'Archive' template theme exists. False if else.
+ */
+function genesis_theme_has_page_archive_template() {
+	$templates = get_page_templates();
+
+	return isset( $templates['Archive'] );
+}
+
+/**
+ * Create the 'page_blog.php' file within child theme if missing.
+ *
+ * @since 3.0.0
+ *
+ * @return null|integer|boolean Null if file exists, number of bytes written, or false if error.
+ */
+function genesis_create_page_blog_file() {
+	$directory_path = get_stylesheet_directory();
+	$page_blog_path = "{$directory_path}/page_blog.php";
+
+	if ( file_exists( $page_blog_path ) ) {
+		return;
+	}
+
+	$content = <<<'CONTENT'
+<?php
+/**
+ * Template Name: Blog
+ */
+
+genesis();
+CONTENT;
+
+	return file_put_contents( $page_blog_path, $content );
+}
+
+/**
+ * Create the 'page_archive.php' file within child theme if missing.
+ *
+ * @since 3.0.0
+ *
+ * @return null|integer|boolean Null if file exists, number of bytes written, or false if error.
+ */
+function genesis_create_page_archive_file() {
+	$directory_path    = get_stylesheet_directory();
+	$page_archive_path = "{$directory_path}/page_archive.php";
+
+	if ( file_exists( $page_archive_path ) ) {
+		return;
+	}
+
+	$content = <<<'CONTENT'
+<?php
+/**
+ * Template Name: Archive
+ */
+
+remove_action( 'genesis_entry_content', 'genesis_do_post_content' );
+add_action( 'genesis_entry_content', 'genesis_page_archive_content' );
+
+function genesis_page_archive_content() {
+    $heading = ( genesis_a11y( 'headings' ) ? 'h2' : 'h4' );
+
+    genesis_sitemap( $heading );
+}
+
+genesis();
+CONTENT;
+
+	return file_put_contents( $page_archive_path, $content );
+}
+
+/**
+ * Upgrade the database for changes in db version 3000.
+ *
+ * @since 3.0.0
+ */
+function genesis_upgrade_3000() {
+	if ( genesis_get_option( 'adsense_id' ) ) {
+		$header_scripts = genesis_get_option( 'header_scripts' );
+		$adsense_id     = genesis_get_option( 'adsense_id' );
+		$adsense        = <<<ADSENSE
+<script async src="http://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+<script>
+(adsbygoogle = window.adsbygoogle || []).push({
+google_ad_client: "$adsense_id",
+enable_page_level_ads: true,
+tag_partner: "genesis"
+});
+</script>
+ADSENSE;
+
+		genesis_update_settings(
+			array(
+				'header_scripts' => $header_scripts . "\n" . $adsense,
+			)
+		);
+	}
+}
+
+/**
  * Upgrade the database to version 2700.
  *
  * @since 2.7.0
@@ -691,6 +887,16 @@ function genesis_upgrade() {
 		genesis_upgrade_2700();
 	}
 
+	// UPDATE DB TO VERSION 3000.
+	if ( genesis_get_option( 'db_version', null, false ) < '3000' ) {
+		genesis_upgrade_3000();
+	}
+
+	// UPDATE DB TO VERSION 3001.
+	if ( genesis_get_option( 'db_version', null, false ) < '3001' ) {
+		genesis_upgrade_3001();
+	}
+
 	// UPDATE DB TO LATEST VERSION.
 	if ( genesis_get_option( 'db_version', null, false ) < PARENT_DB_VERSION ) {
 		genesis_upgrade_db_latest();
@@ -750,56 +956,47 @@ function genesis_silent_upgrade() {
 
 }
 
-add_action( 'genesis_upgrade', 'genesis_upgrade_redirect' );
+add_action( 'upgrader_process_complete', 'genesis_update_complete', 10, 2 );
 /**
- * Redirect the user back to the "What's New" page, refreshing the data and notifying the user that they have
- * successfully updated.
+ * Upgrade the Genesis database after an update has completed.
  *
- * @since 1.6.0
+ * After an update has been completed, send a remote GET request to `admin-ajax.php` to trigger a silent upgrade.
  *
- * @return null Return early if not an admin page.
+ * @since 2.10.0
+ *
+ * @param object $upgrader   The upgrader object.
+ * @param array  $hook_extra Details about the upgrade process.
+ * @return null
  */
-function genesis_upgrade_redirect() {
-
-	if ( ! is_admin() || ! current_user_can( 'edit_theme_options' ) || is_customize_preview() ) {
+function genesis_update_complete( $upgrader, $hook_extra ) {
+	if ( $hook_extra['action'] !== 'update' || $hook_extra['type'] !== 'theme' ) {
 		return;
 	}
 
-	genesis_admin_redirect( 'genesis-upgraded' ); // What's New page.
-
-}
-
-add_action( 'admin_notices', 'genesis_upgraded_notice' );
-/**
- * Displays the notice that the theme settings were successfully updated to the latest version.
- *
- * Currently only used for pre-release update notices.
- *
- * @since 1.2.0
- *
- * @return void Return early if not on the Theme Settings page.
- */
-function genesis_upgraded_notice() {
-
-	if ( ! genesis_is_menu_page( 'genesis' ) ) {
+	// Multiple themes are being updated but not Genesis.
+	if ( isset( $hook_extra['themes'] ) && ! in_array( 'genesis', $hook_extra['themes'] ) ) {
 		return;
 	}
-	if ( isset( $_REQUEST['upgraded'] ) && 'true' === $_REQUEST['upgraded'] ) {
-		echo '<div id="message" class="updated highlight"><p><strong>';
-		printf(
-			/* translators: 1: Genesis version, 2: URL for What's New admin page. */
-			esc_html__( 'Congratulations, you are now rocking Genesis %1$s! %2$s', 'genesis' ),
-			esc_html( genesis_get_option( 'theme_version' ) ),
-			sprintf(
-				'<a href="%s">%s</a> %s.',
-				esc_url( menu_page_url( 'genesis-upgraded', 0 ) ),
-				esc_html__( 'See what\'s new in', 'genesis' ),
-				esc_html( PARENT_THEME_BRANCH )
-			)
-		);
-		echo '</strong></p></div>';
+
+	// One theme is being updated but not Genesis.
+	if ( isset( $hook_extra['theme'] ) && 'genesis' !== $hook_extra['theme'] ) {
+		return;
 	}
 
+	$silent_upgrade_url = add_query_arg(
+		array(
+			'action' => 'genesis-silent-upgrade',
+		),
+		admin_url( 'admin-ajax.php' )
+	);
+
+	wp_remote_get(
+		$silent_upgrade_url,
+		array(
+			'timeout'  => 0.01,
+			'blocking' => false,
+		)
+	);
 }
 
 add_filter( 'update_theme_complete_actions', 'genesis_update_action_links', 10, 2 );
@@ -807,30 +1004,32 @@ add_filter( 'update_theme_complete_actions', 'genesis_update_action_links', 10, 
  * Filter the action links at the end of an update.
  *
  * This function filters the action links that are presented to the user at the end of a theme update. If the theme
- * being updated is not Genesis, the filter returns the default values. Otherwise, it will provide a link to the
- * Genesis Theme Settings page, which will trigger the database upgrade.
+ * being updated is not Genesis, the filter returns the default values. Otherwise, it will provide its own links.
  *
  * @since 1.1.3
  *
  * @param array  $actions Existing array of action links.
  * @param string $theme   Theme name.
- * @return array Removes all existing action links in favour of a single link, if Genesis is
- *               the theme being updated. Otherwise, return existing action links.
+ * @return array Replace all existing action links, if Genesis is the theme being updated.
+ *               Otherwise, return existing action links.
  */
 function genesis_update_action_links( array $actions, $theme ) {
-
 	if ( 'genesis' !== $theme ) {
 		return $actions;
 	}
 
 	return array(
 		sprintf(
+			'<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>',
+			'https://genesischangelog.com/',
+			esc_html__( 'Check out what\'s new', 'genesis' )
+		),
+		sprintf(
 			'<a href="%s">%s</a>',
-			menu_page_url( 'genesis', 0 ),
-			esc_html__( 'Click here to complete the upgrade', 'genesis' )
+			admin_url( 'customize.php?autofocus[panel]=genesis' ),
+			esc_html__( 'Theme Settings', 'genesis' )
 		),
 	);
-
 }
 
 add_action( 'admin_notices', 'genesis_update_nag' );
